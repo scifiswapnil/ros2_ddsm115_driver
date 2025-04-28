@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>ddsm115_driver</name>
+  <version>0.1.0</version>
+  <description>ROS2 driver for Waveshare DDSM115 servos</description>
+  <license>Apache-2.0</license>
+
+  <maintainer email="you@example.com">Your Name</maintainer>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <exec_depend>yaml-cpp</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

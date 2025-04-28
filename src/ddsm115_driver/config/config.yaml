@@ -1,0 +1,6 @@
+motors:
+  joint1:
+    id: 1
+    mode: position    # ← not “velocity”!
+serial_port: "/dev/ttyACM0"
+publish_rate: 50
