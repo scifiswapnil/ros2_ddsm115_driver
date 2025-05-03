@@ -1,19 +1,20 @@
-// --------------------------------------------------------
 // Implementation (.cpp)
 #include "ddsm115_driver/DDSM115Communicator.h"
-#include <cstring>
-#include <iostream>
+#include <sstream>
 #include <iomanip>
-#include <unistd.h>
+
+
 
 namespace ddsm115 {
 
+static const auto LOGGER = rclcpp::get_logger("DDSM115Communicator");
+
 Communicator::Communicator(const std::string &port_name)
-  : port_fd_(-1), state_(State::FAILED) {
-  pthread_mutex_init(&mutex_, nullptr);
+ : port_fd_(-1), state_(State::FAILED)
+{
   port_fd_ = open(port_name.c_str(), O_RDWR);
   if (port_fd_ < 0) {
-    std::cerr << "Failed to open port " << port_name << ": " << strerror(errno) << std::endl;
+    RCLCPP_ERROR(LOGGER, "Failed to open %s: %s", port_name.c_str(), strerror(errno));
     return;
   }
   configurePort();
@@ -22,7 +23,6 @@ Communicator::Communicator(const std::string &port_name)
 
 Communicator::~Communicator() {
   disconnect();
-  pthread_mutex_destroy(&mutex_);
 }
 
 void Communicator::disconnect() {
@@ -37,12 +37,13 @@ State Communicator::getState() const {
 void Communicator::configurePort() {
   struct termios tty{};
   if (tcgetattr(port_fd_, &tty) != 0) {
-    std::cerr << "tcgetattr failed: " << strerror(errno) << std::endl;
+    RCLCPP_ERROR(LOGGER, "tcgetattr failed: %s", strerror(errno));
     state_ = State::FAILED;
     return;
   }
   tty.c_cflag = CS8 | CLOCAL | CREAD;
-  tty.c_cflag &= ~(PARENB | CSTOPB);
+  tty.c_cflag &= ~PARENB;
+  tty.c_cflag &= ~CSTOPB;
   tty.c_iflag = 0;
   tty.c_oflag = 0;
   tty.c_lflag = 0;
@@ -51,17 +52,9 @@ void Communicator::configurePort() {
   cfsetispeed(&tty, BAUD_RATE);
   cfsetospeed(&tty, BAUD_RATE);
   if (tcsetattr(port_fd_, TCSANOW, &tty) != 0) {
-    std::cerr << "tcsetattr failed: " << strerror(errno) << std::endl;
+    RCLCPP_ERROR(LOGGER, "tcsetattr failed: %s", strerror(errno));
     state_ = State::FAILED;
   }
-}
-
-void Communicator::lock() {
-  pthread_mutex_lock(&mutex_);
-}
-
-void Communicator::unlock() {
-  pthread_mutex_unlock(&mutex_);
 }
 
 uint8_t Communicator::computeCRC(const uint8_t *data, size_t len) const {
@@ -79,97 +72,107 @@ uint8_t Communicator::computeCRC(const uint8_t *data, size_t len) const {
 }
 
 void Communicator::sendPacket(const uint8_t *pkt) {
-  lock();
-  write(port_fd_, pkt, PACKET_SIZE);
-  unlock();
+  std::lock_guard<std::mutex> guard(mutex_);
+  ssize_t written = write(port_fd_, pkt, PACKET_SIZE);
+  if (written != PACKET_SIZE) {
+    RCLCPP_ERROR(LOGGER, "sendPacket: expected %zu but wrote %zd: %s", PACKET_SIZE, written, strerror(errno));
+  } else {
+    std::stringstream ss;
+    ss << std::hex << std::setfill('0');
+    for (size_t i = 0; i < PACKET_SIZE; ++i) ss << std::setw(2) << int(pkt[i]) << ' ';
+    RCLCPP_INFO(LOGGER, "Sent packet: %s", ss.str().c_str());
+  }
 }
 
 void Communicator::readPacket(uint8_t *buf) {
-  int total = 0;
-  while (total < static_cast<int>(PACKET_SIZE)) {
-    int rc = read(port_fd_, buf + total, PACKET_SIZE - total);
+  int total = 0, rc;
+  while (total < PACKET_SIZE) {
+    std::cout<<"Reading packet: " << total << std::endl;
+    rc = read(port_fd_, buf + total, PACKET_SIZE - total);
     if (rc <= 0) break;
     total += rc;
   }
+  if (total > 0) {
+    std::stringstream ss;
+    ss << std::hex << std::setfill('0');
+    for (int i = 0; i < total; ++i) ss << std::setw(2) << int(buf[i]) << ' ';
+    RCLCPP_INFO(LOGGER, "Received %d bytes: %s", total, ss.str().c_str());
+  } else {
+    RCLCPP_WARN(LOGGER, "readPacket: no data received");
+  }
+}
+
+void Communicator::switchMode(uint8_t id, Mode m) {
+  uint8_t pkt[PACKET_SIZE] = {id,static_cast<uint8_t>(Command::SWITCH_MODE)};
+  memset(pkt + 2, 0, PACKET_SIZE - 3);
+  pkt[8] = 0;
+  pkt[9] = static_cast<uint8_t>(m); //computeCRC(pkt, 9);
+  sendPacket(pkt);
+}
+
+void Communicator::setID(uint8_t new_id) {
+  uint8_t pkt[PACKET_SIZE] = { 0xAA, static_cast<uint8_t>(Command::SET_ID), 0x53, new_id };
+  memset(pkt + 4, 0, PACKET_SIZE - 5);
+  pkt[9] = computeCRC(pkt, 9);
+  sendPacket(pkt);
+}
+
+Feedback Communicator::queryID() {
+  // Packet: DATA[0]=0xC8, DATA[1]=0x64
+  uint8_t pkt[PACKET_SIZE] = { 0xC8, 0x64 };
+  memset(pkt + 2, 0, PACKET_SIZE - 3);
+  pkt[9] = computeCRC(pkt, 9);
+  sendPacket(pkt);
+
+  uint8_t buf[PACKET_SIZE] = {0};
+  readPacket(buf);
+  return parseFeedback(buf);
+}
+
+// Updated driveMotor: include acceleration time and brake
+Feedback Communicator::driveMotor(uint8_t id, int16_t value, uint8_t acc_time, uint8_t brake) {
+  uint8_t pkt[PACKET_SIZE] = {
+    id,
+    static_cast<uint8_t>(Command::DRIVE_MOTOR),
+    static_cast<uint8_t>(value >> 8),
+    static_cast<uint8_t>(value & 0xFF),
+    0,
+    0,
+    acc_time,
+    brake,
+    0
+  };
+  pkt[9] = computeCRC(pkt, 9);
+  sendPacket(pkt);
+  uint8_t buf[PACKET_SIZE] = {0};
+  readPacket(buf);
+  return parseFeedback(buf);
 }
 
 Feedback Communicator::parseFeedback(const uint8_t *buf) const {
   Feedback fb;
-  fb.status = (buf[9] == computeCRC(buf, 9)) ? State::NORMAL : State::FAILED;
-  fb.mode   = static_cast<Mode>(buf[1]);
-
-  int16_t t_cur = (buf[2] << 8) | buf[3];
-  int16_t t_vel = (buf[4] << 8) | buf[5];
-  fb.current  = double(t_cur) * (8.0 / 32767.0);
-  fb.velocity = double(t_vel);
-
-  if (buf[1] == static_cast<uint8_t>(Command::GET_FEEDBACK)) {
-    uint8_t raw_pos_8 = buf[7];
-    fb.position = double(raw_pos_8) * (360.0 / 255.0);
-  } else {
-    uint16_t t_pos = (buf[6] << 8) | buf[7];
-    fb.position = double(t_pos) * (360.0 / 32767.0);
-  }
-  fb.error = buf[8];
+  fb.status           = (buf[9] == computeCRC(buf, 9)) ? State::NORMAL : State::FAILED;
+  fb.mode             = static_cast<Mode>(buf[1]);
+  fb.id               = buf[0];
+  int16_t tc          = (buf[2] << 8) | buf[3];
+  int16_t tv          = (buf[4] << 8) | buf[5];
+  int16_t tp          = (buf[6] << 8) | buf[7];
+  fb.current          = double(tc) * (8.0 / 32767.0);
+  fb.velocity         = double(tv);
+  fb.position         = double(tp)* (360.0 / 32767.0);     // Raw units
+  if (fb.position < 0) fb.position += 360.0; // Wrap into [0,360) 
+  fb.error            = buf[8];
   return fb;
 }
 
-void Communicator::switchMode(uint8_t id, Mode m) {
-  uint8_t pkt[PACKET_SIZE] = {};
-  pkt[0] = id;
-  pkt[1] = static_cast<uint8_t>(Command::SWITCH_MODE);
-  pkt[8] = static_cast<uint8_t>(m);
+Feedback Communicator::getAdditionalFeedback(uint8_t id) {
+  uint8_t pkt[PACKET_SIZE] = {id, static_cast<uint8_t>(Command::GET_FEEDBACK)};
+  memset(pkt + 2, 0, PACKET_SIZE - 3);
   pkt[9] = computeCRC(pkt, 9);
-  std::cout << "SwitchMode packet: ";
-  for (uint8_t byte : pkt) std::cout << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
-                                 << int(byte) << " ";
-  std::cout << std::dec << std::endl;
   sendPacket(pkt);
-}
-
-Feedback Communicator::driveMotor(uint8_t id, int16_t val) {
-  uint8_t pkt[PACKET_SIZE] = {};
-  pkt[0] = id;
-  pkt[1] = static_cast<uint8_t>(Command::DRIVE_MOTOR);
-  pkt[2] = uint8_t((val >> 8) & 0xFF);
-  pkt[3] = uint8_t(val & 0xFF);
-  pkt[9] = computeCRC(pkt, 9);
-  std::cout << "Driving packet: ";
-  for (uint8_t byte : pkt) std::cout << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
-                                    << int(byte) << " ";
-  std::cout << std::dec << std::endl;
-  sendPacket(pkt);
-  uint8_t buf[PACKET_SIZE] = {};
+  uint8_t buf[PACKET_SIZE] = {0};
   readPacket(buf);
   return parseFeedback(buf);
-}
-
-Feedback Communicator::getFeedback(uint8_t id) {
-  uint8_t pkt[PACKET_SIZE] = {};
-  pkt[0] = id;
-  pkt[1] = static_cast<uint8_t>(Command::GET_FEEDBACK);
-  pkt[9] = computeCRC(pkt, 9);
-  sendPacket(pkt);
-  uint8_t buf[PACKET_SIZE] = {};
-  readPacket(buf);
-  return parseFeedback(buf);
-}
-
-void Communicator::setID(uint8_t /*old_id*/, uint8_t new_id) {
-  uint8_t pkt[PACKET_SIZE] = {0xAA, 0x55, 0x53, new_id};
-  pkt[9] = computeCRC(pkt, 9);
-  for (int i = 0; i < 5; ++i) sendPacket(pkt);
-}
-
-uint8_t Communicator::queryID(uint8_t id) {
-  uint8_t pkt[PACKET_SIZE] = {};
-  pkt[0] = id;
-  pkt[1] = static_cast<uint8_t>(Command::QUERY_ID);
-  pkt[9] = computeCRC(pkt, 9);
-  sendPacket(pkt);
-  uint8_t resp[PACKET_SIZE] = {};
-  readPacket(resp);
-  return resp[3];
 }
 
 } // namespace ddsm115

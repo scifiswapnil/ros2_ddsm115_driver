@@ -10,38 +10,26 @@ find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(yaml-cpp REQUIRED)
 
-
+# Include headers
 include_directories(
   include
 )
 
-add_library(ddsm115_comm
-  src/DDSM115Communicator.cpp
-)
-ament_target_dependencies(ddsm115_comm rclcpp)
-target_link_libraries(ddsm115_comm yaml-cpp)
-
-
+# Build node executable with embedded Communicator implementation
 add_executable(ddsm115_node
   src/ddsm115_node.cpp
-)
-target_link_libraries(ddsm115_node
-  ddsm115_comm
+  src/DDSM115Communicator.cpp
 )
 ament_target_dependencies(ddsm115_node
-  rclcpp sensor_msgs std_msgs yaml-cpp
+  rclcpp
+  sensor_msgs
+  std_msgs
+  yaml-cpp
 )
 
+# Install the node executable
 install(
-  DIRECTORY include/
-  DESTINATION include/
-)
-
-install(TARGETS
-  ddsm115_comm
-  ddsm115_node
-  ARCHIVE DESTINATION lib
-  LIBRARY DESTINATION lib
+  TARGETS ddsm115_node
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 

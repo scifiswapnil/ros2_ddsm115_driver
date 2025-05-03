@@ -1,141 +1,123 @@
-// ddsm115_node.cpp
+// motor_test_position_node.cpp
+// ROS2 node to test ddsm115::Communicator in Position Loop mode with target reach detection
 
 #include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/joint_state.hpp>
-#include <std_msgs/msg/float64.hpp>
-#include <yaml-cpp/yaml.h>
-#include <map>
 #include "ddsm115_driver/DDSM115Communicator.h"
 
-using namespace ddsm115;
+using namespace std::chrono_literals;
+using ddsm115::Communicator;
+using ddsm115::Mode;
+using ddsm115::State;
 
-struct MotorConfig {
-  uint8_t id;
-  Mode mode;
-};
+uint16_t angleToMotorCount(double angleDeg) {
+  // Scale factor: counts per degree
+  constexpr double COUNTS_PER_DEG = 32767.0 / 360.0;
 
-class Ddsm115Node : public rclcpp::Node {
+  // Wrap into [0,360):
+  double wrapped = std::fmod(angleDeg, 360.0);
+  if (wrapped < 0) wrapped += 360.0;
+
+  // Convert to counts (round nearest):
+  double rawCount = wrapped * COUNTS_PER_DEG;
+  uint16_t count = static_cast<uint16_t>(std::round(rawCount));
+
+  // Safety clamp (in case of rounding up to 32768)
+  return (count > 32767 ? 32767 : count);
+}
+
+class MotorPositionTestNode : public rclcpp::Node {
 public:
-  Ddsm115Node()
-  : Node("ddsm115_node")
+  MotorPositionTestNode()
+  : Node("motor_position_test_node"),
+    comm_("/dev/ttyUSB0"),
+    forward_(true),
+    target_deg_(0.0),
+    reached_(true)
   {
-    // Load parameters from config.yaml
-    this->declare_parameter("config_file", "config/config.yaml");
-    std::string config_file;
-    this->get_parameter("config_file", config_file);
+    // if (comm_.getState() != State::NORMAL) {
+    //   RCLCPP_FATAL(get_logger(), "Communicator init failed on %s", "/dev/ttyACM0");
+    //   rclcpp::shutdown();
+    //   return;
+    // }
+    
+    // for (int i = 0; i < 5; ++i) {
+    //   comm_.setID(10);
+    // }
 
-    YAML::Node cfg = YAML::LoadFile(config_file);
-    serial_port_ = cfg["serial_port"].as<std::string>();
-    publish_rate_ = cfg["publish_rate"].as<int>();
+    auto fb =  comm_.queryID();
+    RCLCPP_INFO(get_logger(), "Motor ID: %d", fb.id);
+    // // Switch to POSITION_LOOP mode
+    // comm_.switchMode(1, Mode::POSITION_LOOP);
+    // RCLCPP_INFO(get_logger(), "Motor ID 1 set to POSITION_LOOP mode");
 
-    for (auto it : cfg["motors"]) {
-      std::string joint = it.first.as<std::string>();
-      auto mnode = it.second;
-      MotorConfig mc;
-      mc.id = mnode["id"].as<int>();
-      std::string m = mnode["mode"].as<std::string>();
-      if (m == "current") mc.mode = Mode::CURRENT_LOOP;
-      else if (m == "position") {mc.mode = Mode::POSITION_LOOP; std::cout << "position mode" << std::endl;} 
-      else mc.mode = Mode::VELOCITY_LOOP;
-      motors_[joint] = mc;
-    }
+    // // Timer: toggle command every 5 seconds
+    // command_timer_ = create_wall_timer(
+    //   150ms, std::bind(&MotorPositionTestNode::onCommandTimer, this)
+    // );
 
-    // Initialize communicator
-    comm_ = std::make_shared<Communicator>(serial_port_);
-    if (comm_->getState() != State::NORMAL) {
-      RCLCPP_ERROR(this->get_logger(), "Failed to open port %s", serial_port_.c_str());
-      rclcpp::shutdown();
-    }
-
-    // Set modes
-    for (auto &p : motors_) {
-      comm_->switchMode(p.second.id, p.second.mode);
-    }
-
-    // Publisher
-    joint_state_pub_ = this->create_publisher<sensor_msgs::msg::JointState>("/joint_states", 10);
-
-    // Subscribers: store last commands
-    for (auto &p : motors_) {
-      auto joint = p.first;
-      auto id    = p.second.id;
-
-      auto vel_topic = joint + "/cmd_vel";
-      auto pos_topic = joint + "/cmd_pos";
-
-      auto vel_cb = [this, joint](std_msgs::msg::Float64::SharedPtr msg) {
-        // store raw velocity command
-        last_vel_cmd_[joint] = static_cast<int16_t>(msg->data);
-      };
-      auto pos_cb = [this, joint](std_msgs::msg::Float64::SharedPtr msg) {
-        // convert radian to raw encoder units
-        double deg = msg->data * (180.0/M_PI);
-        last_pos_cmd_[joint] = static_cast<int16_t>((deg / 360.0) * 32767);
-        std::cout << "pos cmd: " << last_pos_cmd_[joint] << std::endl;
-      };
-
-      subs_.push_back(
-        this->create_subscription<std_msgs::msg::Float64>(vel_topic, 10, vel_cb));
-      subs_.push_back(
-        this->create_subscription<std_msgs::msg::Float64>(pos_topic, 10, pos_cb));
-    }
-
-    // Timer for publishing feedback (and re-sending last command)
-    timer_ = this->create_wall_timer(
-      std::chrono::milliseconds(int(1000.0/publish_rate_)),
-      std::bind(&Ddsm115Node::publishFeedback, this));
+    // Timer: poll feedback every 500ms
+    // feedback_timer_ = create_wall_timer(
+    //   5s, std::bind(&MotorPositionTestNode::onFeedbackTimer, this)
+    // );
   }
 
 private:
-  void publishFeedback() {
-    // Re-send last commands to hold setpoints
-    for (auto &p : motors_) {
-      const auto &joint = p.first;
-      const auto &mc    = p.second;
-      auto id = mc.id;
-      if (mc.mode == Mode::POSITION_LOOP) {
-        auto it = last_pos_cmd_.find(joint);
-        if (it != last_pos_cmd_.end()) {
-          comm_->driveMotor(id, it->second);
-        }
-      } else if (mc.mode == Mode::VELOCITY_LOOP) {
-        auto it = last_vel_cmd_.find(joint);
-        if (it != last_vel_cmd_.end()) {
-          comm_->driveMotor(id, it->second);
-        }
-      }
-      // For current loop, implement similarly if needed
-    }
+  void onCommandTimer() {
+    // Only issue new command if previous target reached
+    // if (!reached_) return;
 
-    // Gather feedback and publish
-    auto msg = sensor_msgs::msg::JointState();
-    msg.header.stamp = this->now();
-    for (auto &p : motors_) {
-      const auto &joint = p.first;
-      const auto &mc    = p.second;
-      auto fb = comm_->getFeedback(mc.id);
-      msg.name.push_back(joint);
-      msg.position.push_back(fb.position * M_PI/180.0);
-      msg.velocity.push_back(fb.velocity * M_PI/30.0);
-      msg.effort.push_back(fb.current);
+    // Determine next target angle
+    target_deg_ = forward_ ?  45.0 : -45.0;
+    // Convert degrees to raw units
+    int16_t raw_target = angleToMotorCount(target_deg_);//static_cast<int16_t>(target_deg_ * 32767.0 / 360.0);
+
+    // auto fb = comm_.driveMotor(1, raw_target, Mode::VELOCITY_LOOP);
+    auto fb = comm_.driveMotor(1, raw_target, 0.1, 1);
+    // RCLCPP_INFO(get_logger(), "Commanded target: %.2f° (raw=%d)", target_deg_, raw_target);
+    RCLCPP_DEBUG(
+      get_logger(),
+      "Monitor | pos: %.2f° | vel: %.2f rpm | cur: %.2f A | err: 0x%02X | status: %s",
+      fb.position, fb.velocity, fb.current,
+      fb.error,
+      (fb.status == State::NORMAL ? "OK" : "CRC_FAIL")
+    );
+
+    if (std::abs(angleToMotorCount(fb.position) - angleToMotorCount(target_deg_)) < 10) {
+      RCLCPP_INFO(get_logger(), "Reached target: %.2f°", target_deg_);
+      forward_ = !forward_;
+    }else{
+      // Mark as awaiting reach
+      
     }
-    joint_state_pub_->publish(msg);
   }
 
-  std::string serial_port_;
-  int publish_rate_;
-  std::shared_ptr<Communicator> comm_;
-  std::map<std::string, MotorConfig> motors_;
-  std::map<std::string, int16_t> last_pos_cmd_;
-  std::map<std::string, int16_t> last_vel_cmd_;
-  rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub_;
-  std::vector<rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr> subs_;
-  rclcpp::TimerBase::SharedPtr timer_;
+  void onFeedbackTimer() {
+    // auto fb = comm_.getFeedback(1); //motor ID 1
+    // RCLCPP_DEBUG(
+    //   get_logger(),
+    //   "Monitor | pos: %.2f° | vel: %.2f rpm | cur: %.2f A | err: 0x%02X | status: %s",
+    //   fb.position, fb.velocity, fb.current,
+    //   fb.error,
+    //   (fb.status == State::NORMAL ? "OK" : "CRC_FAIL")
+    // );
+    // // Check if target reached within 1° tolerance
+    // if (!reached_ && std::abs(fb.position - target_deg_) < 5.0) {
+    //   RCLCPP_INFO(get_logger(), "Reached target: %.2f°", target_deg_);
+    //   reached_ = true;
+    // }
+  }
+
+  Communicator comm_;
+  bool forward_;
+  double target_deg_;    // Current target in degrees
+  bool reached_;         // Flag whether target reached
+  rclcpp::TimerBase::SharedPtr command_timer_;
+  rclcpp::TimerBase::SharedPtr feedback_timer_;
 };
 
-int main(int argc, char * argv[]) {
+int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
-  auto node = std::make_shared<Ddsm115Node>();
+  auto node = std::make_shared<MotorPositionTestNode>();
   rclcpp::spin(node);
   rclcpp::shutdown();
   return 0;
