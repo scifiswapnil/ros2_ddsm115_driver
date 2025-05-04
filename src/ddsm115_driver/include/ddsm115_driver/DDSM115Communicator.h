@@ -35,6 +35,8 @@ struct Feedback {
   double  current;
   double  velocity;
   double  position;
+  double temperature;
+  double error_code;
   uint8_t error;
   State   status;
 };
@@ -64,7 +66,10 @@ private:
   void sendPacket(const uint8_t *packet);
   void readPacket(uint8_t *buffer);
   Feedback parseFeedback(const uint8_t *buf) const;
+  Feedback parseAdditionalFeedback(const uint8_t *buf) const;
 };
 
 } // namespace ddsm115
 #endif // DDSM115_COMMUNICATOR_H
+
+

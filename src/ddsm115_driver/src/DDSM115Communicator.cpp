@@ -3,8 +3,6 @@
 #include <sstream>
 #include <iomanip>
 
-
-
 namespace ddsm115 {
 
 static const auto LOGGER = rclcpp::get_logger("DDSM115Communicator");
@@ -80,14 +78,14 @@ void Communicator::sendPacket(const uint8_t *pkt) {
     std::stringstream ss;
     ss << std::hex << std::setfill('0');
     for (size_t i = 0; i < PACKET_SIZE; ++i) ss << std::setw(2) << int(pkt[i]) << ' ';
-    RCLCPP_INFO(LOGGER, "Sent packet: %s", ss.str().c_str());
+    // RCLCPP_INFO(LOGGER, "Sent packet: %s", ss.str().c_str());
   }
 }
 
 void Communicator::readPacket(uint8_t *buf) {
   int total = 0, rc;
   while (total < PACKET_SIZE) {
-    std::cout<<"Reading packet: " << total << std::endl;
+    // std::cout<<"Reading packet: " << total << std::endl;
     rc = read(port_fd_, buf + total, PACKET_SIZE - total);
     if (rc <= 0) break;
     total += rc;
@@ -96,7 +94,7 @@ void Communicator::readPacket(uint8_t *buf) {
     std::stringstream ss;
     ss << std::hex << std::setfill('0');
     for (int i = 0; i < total; ++i) ss << std::setw(2) << int(buf[i]) << ' ';
-    RCLCPP_INFO(LOGGER, "Received %d bytes: %s", total, ss.str().c_str());
+    // RCLCPP_INFO(LOGGER, "Received %d bytes: %s", total, ss.str().c_str());
   } else {
     RCLCPP_WARN(LOGGER, "readPacket: no data received");
   }
@@ -152,14 +150,31 @@ Feedback Communicator::driveMotor(uint8_t id, int16_t value, uint8_t acc_time, u
 Feedback Communicator::parseFeedback(const uint8_t *buf) const {
   Feedback fb;
   fb.status           = (buf[9] == computeCRC(buf, 9)) ? State::NORMAL : State::FAILED;
-  fb.mode             = static_cast<Mode>(buf[1]);
   fb.id               = buf[0];
+  fb.mode             = static_cast<Mode>(buf[1]);
   int16_t tc          = (buf[2] << 8) | buf[3];
   int16_t tv          = (buf[4] << 8) | buf[5];
   int16_t tp          = (buf[6] << 8) | buf[7];
   fb.current          = double(tc) * (8.0 / 32767.0);
-  fb.velocity         = double(tv);
-  fb.position         = double(tp)* (360.0 / 32767.0);     // Raw units
+  fb.velocity         = double(tv) ;//* ( 32767.0);
+  fb.position         = double(tp) * (360.0 / 32767.0);     // Raw units
+  if (fb.position < 0) fb.position += 360.0; // Wrap into [0,360) 
+  fb.error            = buf[8];
+  return fb;
+}
+
+Feedback Communicator::parseAdditionalFeedback(const uint8_t *buf) const {
+  Feedback fb;
+  fb.status           = (buf[9] == computeCRC(buf, 9)) ? State::NORMAL : State::FAILED;
+  fb.id               = buf[0];
+  fb.mode             = static_cast<Mode>(buf[1]);
+  int16_t tc          = (buf[2] << 8) | buf[3];
+  int16_t tv          = (buf[4] << 8) | buf[5];
+  fb.temperature      = buf[6];
+  fb.error_code       = buf[8];
+  fb.current          = double(tc) * (8.0 / 32767.0);
+  fb.velocity         = double(tv) ;//* (32767.0);
+  fb.position         = (static_cast<int>(buf[7]) / 255.0) * 360.0;;
   if (fb.position < 0) fb.position += 360.0; // Wrap into [0,360) 
   fb.error            = buf[8];
   return fb;
@@ -172,7 +187,7 @@ Feedback Communicator::getAdditionalFeedback(uint8_t id) {
   sendPacket(pkt);
   uint8_t buf[PACKET_SIZE] = {0};
   readPacket(buf);
-  return parseFeedback(buf);
+  return parseAdditionalFeedback(buf);
 }
 
 } // namespace ddsm115

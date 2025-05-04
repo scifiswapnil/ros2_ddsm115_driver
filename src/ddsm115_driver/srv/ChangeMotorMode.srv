@@ -1,0 +1,6 @@
+# Request
+uint8 id
+uint8 mode   # 1=CURRENT_LOOP, 2=VELOCITY_LOOP, 3=POSITION_LOOP
+---
+# Response
+bool success

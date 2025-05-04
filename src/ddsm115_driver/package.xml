@@ -9,12 +9,15 @@
   <maintainer email="kalhapure.swapnil@gmail.com">Your Name</maintainer>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <build_depend>rosidl_default_generators</build_depend>
+  <exec_depend>rosidl_default_runtime</exec_depend>
 
   <depend>rclcpp</depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
   <exec_depend>yaml-cpp</exec_depend>
-
+  <member_of_group>rosidl_interface_packages</member_of_group>
+  
   <export>
     <build_type>ament_cmake</build_type>
   </export>
