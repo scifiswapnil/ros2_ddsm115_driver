@@ -1,18 +1,51 @@
 controller_manager:
   ros__parameters:
-    update_rate: 100
+    update_rate: 5
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
     joint1_position_controller:
       type: position_controllers/JointGroupPositionController
-      joints:
-        - joint1
-      gains:
-        p: 10.0
-        i: 0.1
-        d: 0.01
 
     joint2_velocity_controller:
       type: velocity_controllers/JointGroupVelocityController
-      joints:
-        - joint2
-      gains:
-        p: 5.0
+
+# ── now each controller gets its own private namespace ──────────────
+joint1_position_controller:
+  ros__parameters:
+    joints:
+      - joint1
+    gains:
+      p: 10.0
+      i: 0.1
+      d: 0.01
+
+joint2_velocity_controller:
+  ros__parameters:
+    joints:
+      - joint2
+    gains:
+      p: 5.0
+
+# # config/controllers.yaml
+# controller_manager:
+#   ros__parameters:
+#     update_rate: 5
+
+#     joint_state_broadcaster:
+#       type: joint_state_broadcaster/JointStateBroadcaster
+
+#     joint1_position_controller:
+#       type: position_controllers/JointGroupPositionController
+#       joints: ['joint1']
+#       gains:
+#         p: 10.0
+#         i: 0.1
+#         d: 0.01
+
+#     joint2_velocity_controller:
+#       type: velocity_controllers/JointGroupVelocityController
+#       joints: ['joint2']
+#       gains:
+#         p: 5.0

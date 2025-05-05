@@ -12,7 +12,7 @@ def generate_launch_description():
     pkg_share = get_package_share_directory('ddsm115_example')
     urdf_file = os.path.join(pkg_share, 'urdf', 'ddsm115_example.urdf.xacro')
     rviz_cfg  = os.path.join(pkg_share, 'rviz', 'view.rviz')
-    hw_cfg  = os.path.join(pkg_share, 'config','hardware.yaml')
+    # hw_cfg  = os.path.join(pkg_share, 'config','hardware.yaml')
     ct_cfg  = os.path.join(pkg_share, 'config','controllers.yaml')    
 
     # 2) Build the robot_description parameter
@@ -38,15 +38,13 @@ def generate_launch_description():
     ctrl = Node(
         package='controller_manager',
         executable='ros2_control_node',
-        name='controller_manager',
         output='screen',
-        parameters=[ robot_desc, hw_cfg, ct_cfg ],
+        parameters=[ robot_desc, ct_cfg],
         remappings=[
           # Remap its private topic to the global one
           ('~/robot_description', '/robot_description'),
         ],
     )
-
     # 5) Launch RViz so you can see the model if you like
     viz = Node(
         package='rviz2',
@@ -55,5 +53,30 @@ def generate_launch_description():
         output='screen',
         arguments=['-d', rviz_cfg],
     )
+    spawn_jsb = Node(
+        package='controller_manager',
+        executable='spawner',
+        name='joint_state_broadcaster',
+        arguments=['joint_state_broadcaster', 
+                   '--controller-manager', '/controller_manager'],
+        output='screen',
+    )
 
-    return LaunchDescription([rsp, ctrl, viz])
+    spawn_pos = Node(
+        package='controller_manager',
+        executable='spawner',
+        name='joint1_position_controller',
+        arguments=['joint1_position_controller', 
+                   '--controller-manager', '/controller_manager'],
+        output='screen'
+    )
+    spawn_vel = Node(
+        package='controller_manager',
+        executable='spawner',
+        name='joint2_velocity_controller',
+        arguments=['joint2_velocity_controller', 
+                   '--controller-manager', '/controller_manager'],
+        output='screen'
+    )
+
+    return LaunchDescription([rsp, ctrl, spawn_jsb, spawn_pos, spawn_vel, viz])

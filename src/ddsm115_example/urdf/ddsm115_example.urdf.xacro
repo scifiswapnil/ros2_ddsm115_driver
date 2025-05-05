@@ -9,27 +9,38 @@
   <joint name="joint1" type="continuous">
     <parent link="base_link"/>
     <child  link="joint1_link"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
     <axis   xyz="0 0 1"/>
   </joint>
 
   <joint name="joint2" type="continuous">
     <parent link="joint1_link"/>
     <child  link="joint2_link"/>
+    <origin xyz="0 0 0.25" rpy="0 1.57 0"/>
     <axis   xyz="0 0 1"/>
   </joint>
 
-<xacro:arg name="serialport" default="/dev/ttyUSB0"/>
-<xacro:arg name="motor_ids"  default="1,2"/>
 
 <ros2_control name="ddsm115_hw" type="system">
-  <joint name="joint1"/>
-  <joint name="joint2"/>
+  <!-- <joint name="joint1"/>
+  <joint name="joint2"/> -->
+  
+  <joint name="joint1">
+      <param name="motor_id">1</param>
+      <param name="mode">position</param>
+  </joint>
+  
+  <joint name="joint2">
+      <param name="motor_id">2</param>
+      <param name="mode">velocity</param>
+  </joint>
+
 
   <hardware>
     <plugin>ddsm115_hardware::DDSM115HardwareInterface</plugin>
-    <!-- These two lines now actually end up in info.hardware_parameters -->
     <param name="serialport">/dev/ttyUSB0</param>
-    <param name="motor_ids">1,2</param>
+    <!-- <param name="motor_ids">1,2</param>
+    <param name="motor_modes">POSITION_LOOP,VELOCITY_LOOP</param> -->
   </hardware>
 </ros2_control>
 
