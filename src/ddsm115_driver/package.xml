@@ -10,7 +10,16 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
   <build_depend>rosidl_default_generators</build_depend>
+  <build_depend>hardware_interface</build_depend>
+  <build_depend>controller_interface</build_depend>
+  <build_depend>pluginlib</build_depend>
+  <!-- <build_depend>ddsm115_driver</build_depend> -->
+
   <exec_depend>rosidl_default_runtime</exec_depend>
+  <exec_depend>hardware_interface</exec_depend>
+  <exec_depend>controller_interface</exec_depend>
+  <exec_depend>pluginlib</exec_depend>
+  <!-- <exec_depend>ddsm115_driver</exec_depend> -->
 
   <depend>rclcpp</depend>
   <depend>sensor_msgs</depend>
@@ -20,5 +29,6 @@
   
   <export>
     <build_type>ament_cmake</build_type>
+     <pluginlib plugin="${prefix}/plugin_description.xml"/>
   </export>
 </package>

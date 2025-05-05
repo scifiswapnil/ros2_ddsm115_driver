@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<library path="ddsm115_hardware_interface">
+  <class name="ddsm115_hardware::DDSM115HardwareInterface"
+         type="ddsm115_hardware::DDSM115HardwareInterface"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>
+      DDSM115 ROS 2 Control SystemInterface plugin
+    </description>
+  </class>
+</library>

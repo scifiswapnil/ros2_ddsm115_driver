@@ -1,5 +1,8 @@
 Sample config file (motors.yaml):
 joints:
-  - name: joint1
+  - name: front_left_steer
     id: 1
+    mode: position
+  - name: front_left_drive
+    id: 2
     mode: velocity

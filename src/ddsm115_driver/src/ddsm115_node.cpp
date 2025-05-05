@@ -32,7 +32,7 @@ public:
     // Declare and retrieve parameters
     declare_parameter("port_name", std::string("/dev/ttyUSB0"));
     declare_parameter("node_frequency", 20.0);
-    declare_parameter("config_file", std::string("motors.yaml"));
+    declare_parameter("config_file", std::string("config.yaml"));
     get_parameter("port_name", port_name_);
     get_parameter("node_frequency", freq_);
     get_parameter("config_file", config_file_);
@@ -101,8 +101,9 @@ public:
       "set_motor_id",
       [this](const std::shared_ptr<ddsm115_driver::srv::SetMotorId::Request> req,
              std::shared_ptr<ddsm115_driver::srv::SetMotorId::Response> res) {
-        for (int i = 0; i < 5; ++i) comm_->setID(req->id);
+        for (int i = 0; i < 6; ++i) comm_->setID(req->id);
         res->success = (comm_->queryID().id == req->id);
+
       }, qos, service_cb_group_);
 
     query_id_srv_ = this->create_service<ddsm115_driver::srv::QueryMotorId>(

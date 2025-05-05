@@ -1,0 +1,5 @@
+  ros__parameters:
+    hardware_info:
+      ros__parameters:
+        port: "/dev/ttyUSB0"
+        motor_ids: "1,2"

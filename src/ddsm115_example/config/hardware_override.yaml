@@ -1,0 +1,10 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 100
+
+    # NOTE the nesting: hardware → <component_name> → ros__parameters
+    hardware:
+      ddsm115_hw:
+        ros__parameters:
+          serialport: "/dev/ttyUSB0"
+          motor_ids: "1,2"
