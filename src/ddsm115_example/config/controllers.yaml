@@ -1,6 +1,6 @@
 controller_manager:
   ros__parameters:
-    update_rate: 5
+    update_rate: 50
 
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
@@ -9,7 +9,7 @@ controller_manager:
       type: position_controllers/JointGroupPositionController
 
     joint2_velocity_controller:
-      type: velocity_controllers/JointGroupVelocityController
+      type: position_controllers/JointGroupPositionController
 
 # ── now each controller gets its own private namespace ──────────────
 joint1_position_controller:

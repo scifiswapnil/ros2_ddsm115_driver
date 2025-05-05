@@ -32,7 +32,7 @@
   
   <joint name="joint2">
       <param name="motor_id">2</param>
-      <param name="mode">velocity</param>
+      <param name="mode">position</param>
   </joint>
 
 
