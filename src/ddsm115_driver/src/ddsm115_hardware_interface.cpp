@@ -1,45 +1,6 @@
-#include <string>
-#include <vector>
-#include <memory>
-
-#include "rclcpp/rclcpp.hpp"
-#include "rclcpp_lifecycle/node_interfaces/lifecycle_node_interface.hpp"
-#include "hardware_interface/system_interface.hpp"
-#include "rclcpp_lifecycle/state.hpp"
-#include "hardware_interface/types/hardware_interface_return_values.hpp"
-#include "hardware_interface/types/hardware_interface_type_values.hpp"
-#include "pluginlib/class_list_macros.hpp"
-
-#include "ddsm115_driver/DDSM115Communicator.h"
+#include "ddsm115_hardware_interface.hpp"
 
 namespace ddsm115_hardware {
-
-using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
-using hardware_interface::return_type;
-
-class DDSM115HardwareInterface : public hardware_interface::SystemInterface {
-public:
-  CallbackReturn on_init(const hardware_interface::HardwareInfo & info) override;
-  std::vector<hardware_interface::StateInterface> export_state_interfaces() override;
-  std::vector<hardware_interface::CommandInterface> export_command_interfaces() override;
-  CallbackReturn on_activate(const rclcpp_lifecycle::State & previous_state) override;
-  CallbackReturn on_deactivate(const rclcpp_lifecycle::State & previous_state) override;
-  return_type read(const rclcpp::Time & time, const rclcpp::Duration & period) override;
-  return_type write(const rclcpp::Time & time, const rclcpp::Duration & period) override;
-
-private:
-  std::shared_ptr<ddsm115::Communicator> comm_;
-    // Joint state and command buffers
-    std::vector<double> position_;
-    std::vector<double> velocity_;
-    std::vector<double> effort_;
-    std::vector<double> command_;
-  
-    // Configuration
-    std::vector<uint8_t> motor_ids_;
-    std::vector<ddsm115::Mode> motor_modes_;
-    std::string port;
-};
 
 CallbackReturn DDSM115HardwareInterface::on_init(const hardware_interface::HardwareInfo & info) {
   if (SystemInterface::on_init(info) != CallbackReturn::SUCCESS) {
@@ -61,27 +22,7 @@ CallbackReturn DDSM115HardwareInterface::on_init(const hardware_interface::Hardw
     RCLCPP_INFO(rclcpp::get_logger("DDSM115HW"), "  - %s", joint.name.c_str());
   }
 
-  // std::stringstream ss(info.hardware_parameters.at("motor_ids"));
-  // std::string token;
-  // while (std::getline(ss, token, ',')) {
-  //   motor_ids_.push_back(static_cast<uint8_t>(std::stoi(token)));
-  // }
-
-  // std::stringstream ss1(info.hardware_parameters.at("motor_modes"));
-  // std::string token1;
-  // while (std::getline(ss1, token1, ',')) {
-  //   if (token1 == "VELOCITY_LOOP") {
-  //     motor_modes_.push_back(ddsm115::Mode::VELOCITY_LOOP);
-  //   } else if (token1 == "POSITION_LOOP") {
-  //     motor_modes_.push_back(ddsm115::Mode::POSITION_LOOP);
-  //   } else if (token1 == "CURRENT_LOOP") {
-  //     motor_modes_.push_back(ddsm115::Mode::CURRENT_LOOP);
-  //   } else {
-  //     RCLCPP_ERROR(rclcpp::get_logger("DDSM115HW"), "Unknown motor mode: %s", token1.c_str());
-  //     return CallbackReturn::ERROR;
-  //   }
-  // }
-  // std::vector<ddsm115::Mode> joint_modes_; 
+  
   // For each joint, read its motor_id and mode parameters
   for (const auto & joint : info.joints) {
     // motor_id
@@ -104,7 +45,6 @@ CallbackReturn DDSM115HardwareInterface::on_init(const hardware_interface::Hardw
                 joint.name.c_str(), motor_ids_.back(),m.c_str());
   }
   
-
   // Read 'port' from <ros2_control> <param> in URDF
   port = "/dev/ttyUSB0";
   auto it = info.hardware_parameters.find("serialport");
@@ -135,11 +75,6 @@ CallbackReturn DDSM115HardwareInterface::on_init(const hardware_interface::Hardw
     RCLCPP_INFO(rclcpp::get_logger("DDSM115HW"), "ID: %u, Mode: %s", motor_ids_[i], motor_modes_[i] == ddsm115::Mode::VELOCITY_LOOP ? "VELOCITY_LOOP" : (motor_modes_[i] == ddsm115::Mode::POSITION_LOOP ? "POSITION_LOOP" : "CURRENT_LOOP"));
     comm_->switchMode(motor_ids_[i], motor_modes_[i]);
   }
-
-  // for (auto &mc : motor_ids_) {
-  //   comm_mc, ddsm115::Mode::VELOCITY_LOOP);
-  // }
-
 
   return CallbackReturn::SUCCESS;
 }
@@ -194,9 +129,6 @@ return_type DDSM115HardwareInterface::read(
         RCLCPP_WARN(rclcpp::get_logger("DDSM115HW"), "Read error on motor %u", motor_ids_[i]);
         continue;
       }
-      // std::cout << "fb,position: " << fb.position << std::endl;
-      // std::cout << "fb,velocity: " << fb.velocity << std::endl;
-      // std::cout << "fb,current: " << fb.current << std::endl;
 
       position_[i] = (fb.position * 3.14 ) / 180.0; // Convert to radians
       velocity_[i] = (2*3.14*0.5035*fb.velocity)/60.0;
@@ -215,7 +147,6 @@ return_type DDSM115HardwareInterface::write(
     }
     return return_type::OK;
 }
-
 
 // Register the plugin with pluginlib
 PLUGINLIB_EXPORT_CLASS(
