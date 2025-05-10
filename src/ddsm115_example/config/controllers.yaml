@@ -9,8 +9,8 @@ controller_manager:
       type: position_controllers/JointGroupPositionController
 
     wrist_position_controller:
-      type: velocity_controllers/JointGroupVelocityController
-      # effort_controllers/JointGroupEffortController
+      # type: velocity_controllers/JointGroupVelocityController
+      type: effort_controllers/JointGroupEffortController
 
 
 shoulder_position_controller:

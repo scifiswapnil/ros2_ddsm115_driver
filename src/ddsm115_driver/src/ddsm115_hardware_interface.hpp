@@ -37,6 +37,11 @@ private:
     ddsm115::Mode mode;
     ddsm115::Feedback feedback;
   };
+  double motor_radius_ = 0.05035; // radius of motor in meters
+  double motor_torque_constant_ = 0.75; // torque constant of motor in Nm/A
+  double motor_max_rpm_ = 330.0;
+  double motor_readings_value_ = 32767.0;
+
   std::shared_ptr<ddsm115::Communicator> comm_;
   // Joint state and command buffers
   std::vector<double> position_;
@@ -45,8 +50,6 @@ private:
   std::vector<double> command_;
 
   // Configuration
-  // std::vector<uint8_t> motor_ids_;
-  // std::vector<ddsm115::Mode> motor_modes_;
   std::vector<MotorInfo> motor_info_;
   std::string port;
 };

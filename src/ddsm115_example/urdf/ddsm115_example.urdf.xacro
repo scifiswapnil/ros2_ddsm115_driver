@@ -22,8 +22,6 @@
 
 
 <ros2_control name="ddsm115_hw" type="system">
-  <!-- <joint name="joint1"/>
-  <joint name="joint2"/> -->
   
   <joint name="shoulder">
       <param name="motor_id">1</param>
@@ -32,15 +30,14 @@
   
   <joint name="wrist">
       <param name="motor_id">2</param>
-      <param name="mode">VELOCITY_LOOP</param>
+      <!-- <param name="mode">VELOCITY_LOOP</param> -->
+      <param name="mode">EFFORT_LOOP</param>
   </joint>
 
 
   <hardware>
     <plugin>ddsm115_hardware::DDSM115HardwareInterface</plugin>
     <param name="serialport">/dev/ttyUSB0</param>
-    <!-- <param name="motor_ids">1,2</param>
-    <param name="motor_modes">POSITION_LOOP,VELOCITY_LOOP</param> -->
   </hardware>
 </ros2_control>
 

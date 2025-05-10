@@ -43,7 +43,7 @@ CallbackReturn DDSM115HardwareInterface::on_init(const hardware_interface::Hardw
       motor_mode =  ddsm115::Mode::POSITION_LOOP;
     else if (m == "VELOCITY_LOOP")                  
       motor_mode = ddsm115::Mode::VELOCITY_LOOP;
-    else if (m == "CURRENT_LOOP")
+    else if (m == "EFFORT_LOOP")
       motor_mode = ddsm115::Mode::CURRENT_LOOP;
     else {
       RCLCPP_ERROR(rclcpp::get_logger("DDSM115HW"), "Joint '%s' has invalid mode '%s'", joint.name.c_str(), m.c_str());
@@ -84,7 +84,7 @@ CallbackReturn DDSM115HardwareInterface::on_init(const hardware_interface::Hardw
   // Set motor modes 
   RCLCPP_INFO(rclcpp::get_logger("DDSM115HW"), "Motor IDs and modes");
   for (int i = 0; i < motor_info_.size(); ++i) {
-    RCLCPP_INFO(rclcpp::get_logger("DDSM115HW"), "ID: %u, Mode: %s", motor_info_[i].id, motor_info_[i].mode == ddsm115::Mode::VELOCITY_LOOP ? "VELOCITY_LOOP" : (motor_info_[i].mode == ddsm115::Mode::POSITION_LOOP ? "POSITION_LOOP" : "CURRENT_LOOP"));
+    RCLCPP_INFO(rclcpp::get_logger("DDSM115HW"), "ID: %u, Mode: %s", motor_info_[i].id, motor_info_[i].mode == ddsm115::Mode::VELOCITY_LOOP ? "VELOCITY_LOOP" : (motor_info_[i].mode == ddsm115::Mode::POSITION_LOOP ? "POSITION_LOOP" : "EFFORT_LOOP"));
     comm_->switchMode(motor_info_[i].id, motor_info_[i].mode);
   }
 
@@ -139,12 +139,12 @@ return_type DDSM115HardwareInterface::read(
   const rclcpp::Time &, const rclcpp::Duration &) {
     for (size_t i = 0; i < motor_info_.size(); ++i) {
       if (motor_info_[i].feedback.status != ddsm115::State::NORMAL){
-        RCLCPP_WARN(rclcpp::get_logger("DDSM115HW"), "read error on motor %u", motor_info_[i].id);
+        RCLCPP_WARN(rclcpp::get_logger("DDSM115HW"), "Read error on motor with ID : %u", motor_info_[i].id);
         continue;
       }
-      position_[i] = (motor_info_[i].feedback.position * 3.14 ) / 180.0; // Convert to radians
-      velocity_[i] = 2 * 3.14 * 0.05035 * (motor_info_[i].feedback.velocity/60.0);
-      effort_[i]   = 0.75 * (motor_info_[i].feedback.current);
+      position_[i] = (motor_info_[i].feedback.position * M_PI ) / 180.0; // Convert to radians
+      velocity_[i] = 2 * M_PI * motor_radius_ * (motor_info_[i].feedback.velocity/60.0);
+      effort_[i]   = motor_torque_constant_ * (motor_info_[i].feedback.current);
     }
     return return_type::OK;
 }
@@ -152,23 +152,23 @@ return_type DDSM115HardwareInterface::read(
 return_type DDSM115HardwareInterface::write(
   const rclcpp::Time &, const rclcpp::Duration &) {    
     for (size_t i = 0; i < motor_info_.size(); ++i){
-      double val = static_cast<double>(command_[i]);
+      double cmd_value_ = static_cast<double>(command_[i]);
       switch (motor_info_[i].mode) {
         case ddsm115::Mode::POSITION_LOOP:
-          val = ( val * 180.0 / 3.14);
-          val = val < 0.0 ? 360.0 + val : val;;
-          val = std::clamp(std::fmod(val, 360.0) * (32767.0 / 360.0), 0.0, 32767.0);
-          motor_info_[i].feedback = comm_->driveMotor(motor_info_[i].id, static_cast<int16_t>(std::clamp(val, 0.0, 32767.0)), /*acc=*/10, /*brake=*/0);
+          cmd_value_ = ( cmd_value_ * 180.0 / M_PI);
+          cmd_value_ = cmd_value_ < 0.0 ? 360.0 + cmd_value_ : cmd_value_;
+          cmd_value_ = std::clamp(std::fmod(cmd_value_, 360.0) * (motor_readings_value_ / 360.0), 0.0, motor_readings_value_);
+          motor_info_[i].feedback = comm_->driveMotor(motor_info_[i].id, static_cast<int16_t>(std::clamp(cmd_value_, 0.0, motor_readings_value_)), /*acc=*/10, /*brake=*/0);
           break;
         case ddsm115::Mode::VELOCITY_LOOP:
-          val = ((val * 60) / (2 * 3.14 * 0.05035));
-          val = static_cast<int16_t>(std::clamp(val, -330.0, 330.0)); 
-          motor_info_[i].feedback = comm_->driveMotor(motor_info_[i].id, val, /*acc=*/10, /*brake=*/0);
+          cmd_value_ = ((cmd_value_ * 60) / (2 * M_PI * motor_radius_));
+          cmd_value_ = static_cast<int16_t>(std::clamp(cmd_value_, -motor_max_rpm_, motor_max_rpm_)); 
+          motor_info_[i].feedback = comm_->driveMotor(motor_info_[i].id, cmd_value_, /*acc=*/10, /*brake=*/0);
           break;
         case ddsm115::Mode::CURRENT_LOOP:
-          val = (val / 0.75) ;
-          val = static_cast<int16_t>(std::clamp(val * (32767.0 / 8.0), -32767.0, 32767.0));
-          motor_info_[i].feedback = comm_->driveMotor(motor_info_[i].id, val, /*acc=*/10, /*brake=*/0);
+          cmd_value_ = (cmd_value_ / motor_torque_constant_) ;
+          cmd_value_ = static_cast<int16_t>(std::clamp(cmd_value_ * (motor_readings_value_ / 8.0), -motor_readings_value_, motor_readings_value_));
+          motor_info_[i].feedback = comm_->driveMotor(motor_info_[i].id, cmd_value_, /*acc=*/10, /*brake=*/0);
           break;
       }
     }
