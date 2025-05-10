@@ -6,14 +6,14 @@
   <link  name="joint1_link"/>
   <link  name="joint2_link"/>
 
-  <joint name="joint1" type="continuous">
+  <joint name="shoulder" type="continuous">
     <parent link="base_link"/>
     <child  link="joint1_link"/>
     <origin xyz="0 0 0.1" rpy="0 0 0"/>
     <axis   xyz="0 0 1"/>
   </joint>
 
-  <joint name="joint2" type="continuous">
+  <joint name="wrist" type="continuous">
     <parent link="joint1_link"/>
     <child  link="joint2_link"/>
     <origin xyz="0 0 0.25" rpy="0 1.57 0"/>
@@ -25,14 +25,14 @@
   <!-- <joint name="joint1"/>
   <joint name="joint2"/> -->
   
-  <joint name="joint1">
+  <joint name="shoulder">
       <param name="motor_id">1</param>
-      <param name="mode">position</param>
+      <param name="mode">POSITION_LOOP</param>
   </joint>
   
-  <joint name="joint2">
+  <joint name="wrist">
       <param name="motor_id">2</param>
-      <param name="mode">position</param>
+      <param name="mode">VELOCITY_LOOP</param>
   </joint>
 
 

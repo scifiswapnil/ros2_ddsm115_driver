@@ -11,7 +11,7 @@ def generate_launch_description():
     # 1) Locate files
     pkg_share = get_package_share_directory('ddsm115_example')
     urdf_file = os.path.join(pkg_share, 'urdf', 'ddsm115_example.urdf.xacro')
-    rviz_cfg  = os.path.join(pkg_share, 'rviz', 'view.rviz')
+    rviz_cfg  = os.path.join(pkg_share, 'rviz', 'tf.rviz')
     # hw_cfg  = os.path.join(pkg_share, 'config','hardware.yaml')
     ct_cfg  = os.path.join(pkg_share, 'config','controllers.yaml')    
 
@@ -65,16 +65,16 @@ def generate_launch_description():
     spawn_pos = Node(
         package='controller_manager',
         executable='spawner',
-        name='joint1_position_controller',
-        arguments=['joint1_position_controller', 
+        name='shoulder_position_controller',
+        arguments=['shoulder_position_controller', 
                    '--controller-manager', '/controller_manager'],
         output='screen'
     )
     spawn_vel = Node(
         package='controller_manager',
         executable='spawner',
-        name='joint2_velocity_controller',
-        arguments=['joint2_velocity_controller', 
+        name='wrist_position_controller',
+        arguments=['wrist_position_controller', 
                    '--controller-manager', '/controller_manager'],
         output='screen'
     )

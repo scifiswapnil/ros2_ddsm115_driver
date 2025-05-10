@@ -32,17 +32,23 @@ public:
   return_type write(const rclcpp::Time & time, const rclcpp::Duration & period) override;
 
 private:
+  struct MotorInfo {
+    uint8_t id;
+    ddsm115::Mode mode;
+    ddsm115::Feedback feedback;
+  };
   std::shared_ptr<ddsm115::Communicator> comm_;
-    // Joint state and command buffers
-    std::vector<double> position_;
-    std::vector<double> velocity_;
-    std::vector<double> effort_;
-    std::vector<double> command_;
-  
-    // Configuration
-    std::vector<uint8_t> motor_ids_;
-    std::vector<ddsm115::Mode> motor_modes_;
-    std::string port;
+  // Joint state and command buffers
+  std::vector<double> position_;
+  std::vector<double> velocity_;
+  std::vector<double> effort_;
+  std::vector<double> command_;
+
+  // Configuration
+  // std::vector<uint8_t> motor_ids_;
+  // std::vector<ddsm115::Mode> motor_modes_;
+  std::vector<MotorInfo> motor_info_;
+  std::string port;
 };
 }
 

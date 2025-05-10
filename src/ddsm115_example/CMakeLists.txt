@@ -42,5 +42,11 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
+# Install controller rviz
+install(
+  DIRECTORY rviz 
+  DESTINATION share/${PROJECT_NAME}
+)
+
 
 ament_package()

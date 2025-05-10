@@ -160,6 +160,7 @@ Feedback Communicator::parseFeedback(const uint8_t *buf) const {
   fb.position         = double(tp) * (360.0 / 32767.0);     // Raw units
   if (fb.position < 0) fb.position += 360.0; // Wrap into [0,360) 
   fb.error            = buf[8];
+  fb.status           = (buf[9] != 0) ? State::NORMAL : State::FAILED;
   return fb;
 }
 
