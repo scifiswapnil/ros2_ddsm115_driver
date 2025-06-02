@@ -5,27 +5,27 @@ controller_manager:
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
 
-    shoulder_position_controller:
+    front_left_steer_controller:
       type: position_controllers/JointGroupPositionController
 
-    wrist_position_controller:
-      # type: velocity_controllers/JointGroupVelocityController
-      type: effort_controllers/JointGroupEffortController
+    front_left_drive_controller:
+      type: velocity_controllers/JointGroupVelocityController
+      # type: effort_controllers/JointGroupEffortController
 
 
-shoulder_position_controller:
+front_left_steer_controller:
   ros__parameters:
     joints:
-      - shoulder
+      - front_left_steer
     gains:
       p: 10.0
       i: 0.1
       d: 0.01
 
-wrist_position_controller:
+front_left_drive_controller:
   ros__parameters:
     joints:
-      - wrist
+      - front_left_drive
     gains:
       p: 0.1
 

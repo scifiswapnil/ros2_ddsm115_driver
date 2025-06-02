@@ -62,19 +62,21 @@ def generate_launch_description():
         output='screen',
     )
 
+
+
     spawn_pos = Node(
         package='controller_manager',
         executable='spawner',
-        name='shoulder_position_controller',
-        arguments=['shoulder_position_controller', 
+        name='front_left_steer_controller',
+        arguments=['front_left_steer_controller', 
                    '--controller-manager', '/controller_manager'],
         output='screen'
     )
     spawn_vel = Node(
         package='controller_manager',
         executable='spawner',
-        name='wrist_position_controller',
-        arguments=['wrist_position_controller', 
+        name='front_left_drive_controller',
+        arguments=['front_left_drive_controller', 
                    '--controller-manager', '/controller_manager'],
         output='screen'
     )

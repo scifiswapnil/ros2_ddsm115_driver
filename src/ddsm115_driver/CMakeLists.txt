@@ -123,6 +123,13 @@ install(
   DESTINATION share/${PROJECT_NAME}/cmake
 )
 
+install(
+  PROGRAMS
+    scripts/single_swerve_module_controller.py
+    scripts/swerve_drive_controller.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 # -----------------------------------------------------------------------------
 # Export dependencies and targets
 # -----------------------------------------------------------------------------
