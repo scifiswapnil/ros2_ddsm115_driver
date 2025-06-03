@@ -1,44 +1,128 @@
 <?xml version="1.0"?>
-<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="ddsm115_example">
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="swerve_drive">
 
-  <!-- Two simple continuous joints -->
-  <link  name="base_link"/>
-  <link  name="joint1_link"/>
-  <link  name="joint2_link"/>
+  <!-- Base link -->
+  <link name="base_link"/>
+
+  <!-- Front Left Wheel -->
+  <link name="front_left_steer_link"/>
+  <link name="front_left_wheel_link"/>
 
   <joint name="front_left_steer" type="continuous">
     <parent link="base_link"/>
-    <child  link="joint1_link"/>
-    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <child  link="front_left_steer_link"/>
+    <!-- Positioned at x=+0.5, y=+0.5 (front‐left corner of a 1 m×1 m square) -->
+    <origin xyz="0.5 0.5 0" rpy="0 0 0"/>
     <axis   xyz="0 0 1"/>
   </joint>
 
   <joint name="front_left_drive" type="continuous">
-    <parent link="joint1_link"/>
-    <child  link="joint2_link"/>
+    <parent link="front_left_steer_link"/>
+    <child  link="front_left_wheel_link"/>
+    <!-- Drive joint co‐located with the steer joint; rotated 90° around Y so that its axis is aligned for wheel rotation -->
     <origin xyz="0 0 0.25" rpy="0 1.57 0"/>
     <axis   xyz="0 0 1"/>
   </joint>
 
 
-<ros2_control name="ddsm115_hw" type="system">
-  
-  <joint name="front_left_steer">
+  <!-- Front Right Wheel -->
+  <link name="front_right_steer_link"/>
+  <link name="front_right_wheel_link"/>
+
+  <joint name="front_right_steer" type="continuous">
+    <parent link="base_link"/>
+    <child  link="front_right_steer_link"/>
+    <!-- x=+0.5, y=−0.5 (front‐right corner) -->
+    <origin xyz="0.5 -0.5 0" rpy="0 0 0"/>
+    <axis   xyz="0 0 1"/>
+  </joint>
+
+  <joint name="front_right_drive" type="continuous">
+    <parent link="front_right_steer_link"/>
+    <child  link="front_right_wheel_link"/>
+    <origin xyz="0 0 0.25" rpy="0 1.57 0"/>
+    <axis   xyz="0 0 1"/>
+  </joint>
+
+
+  <!-- Rear Left Wheel -->
+  <link name="rear_left_steer_link"/>
+  <link name="rear_left_wheel_link"/>
+
+  <joint name="rear_left_steer" type="continuous">
+    <parent link="base_link"/>
+    <child  link="rear_left_steer_link"/>
+    <!-- x=−0.5, y=+0.5 (rear‐left corner) -->
+    <origin xyz="-0.5 0.5 0" rpy="0 0 0"/>
+    <axis   xyz="0 0 1"/>
+  </joint>
+
+  <joint name="rear_left_drive" type="continuous">
+    <parent link="rear_left_steer_link"/>
+    <child  link="rear_left_wheel_link"/>
+    <origin xyz="0 0 0.25" rpy="0 1.57 0"/>
+    <axis   xyz="0 0 1"/>
+  </joint>
+
+
+  <!-- Rear Right Wheel -->
+  <link name="rear_right_steer_link"/>
+  <link name="rear_right_wheel_link"/>
+
+  <joint name="rear_right_steer" type="continuous">
+    <parent link="base_link"/>
+    <child  link="rear_right_steer_link"/>
+    <!-- x=−0.5, y=−0.5 (rear‐right corner) -->
+    <origin xyz="-0.5 -0.5 0" rpy="0 0 0"/>
+    <axis   xyz="0 0 1"/>
+  </joint>
+
+  <joint name="rear_right_drive" type="continuous">
+    <parent link="rear_right_steer_link"/>
+    <child  link="rear_right_wheel_link"/>
+    <origin xyz="0 0 0.25" rpy="0 1.57 0"/>
+    <axis   xyz="0 0 1"/>
+  </joint>
+
+
+  <!-- ros2_control hardware interface configuration -->
+  <ros2_control name="swerve_hw" type="system">
+    <joint name="front_left_steer">
       <param name="motor_id">1</param>
       <param name="mode">POSITION_LOOP</param>
-  </joint>
-  
-  <joint name="front_left_drive">
+    </joint>
+    <joint name="front_left_drive">
       <param name="motor_id">2</param>
       <param name="mode">VELOCITY_LOOP</param>
-      <!-- <param name="mode">EFFORT_LOOP</param> -->
-  </joint>
+    </joint>
+    <joint name="front_right_steer">
+      <param name="motor_id">3</param>
+      <param name="mode">POSITION_LOOP</param>
+    </joint>
+    <joint name="front_right_drive">
+      <param name="motor_id">4</param>
+      <param name="mode">VELOCITY_LOOP</param>
+    </joint>
+    <joint name="rear_left_steer">
+      <param name="motor_id">5</param>
+      <param name="mode">POSITION_LOOP</param>
+    </joint>
+    <joint name="rear_left_drive">
+      <param name="motor_id">6</param>
+      <param name="mode">VELOCITY_LOOP</param>
+    </joint>
+    <joint name="rear_right_steer">
+      <param name="motor_id">7</param>
+      <param name="mode">POSITION_LOOP</param>
+    </joint>
+    <joint name="rear_right_drive">
+      <param name="motor_id">8</param>
+      <param name="mode">VELOCITY_LOOP</param>
+    </joint>
 
-
-  <hardware>
-    <plugin>ddsm115_hardware::DDSM115HardwareInterface</plugin>
-    <param name="serialport">/dev/ttyUSB0</param>
-  </hardware>
-</ros2_control>
-
+    <hardware>
+      <plugin>ddsm115_hardware::DDSM115HardwareInterface</plugin>
+      <param name="serialport">/dev/ttyUSB0</param>
+    </hardware>
+  </ros2_control>
 </robot>

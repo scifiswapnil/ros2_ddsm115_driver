@@ -6,3 +6,21 @@ joints:
   - name: front_left_drive
     id: 2
     mode: velocity
+  - name: front_right_steer
+    id: 3
+    mode: position
+  - name: front_right_drive
+    id: 4
+    mode: velocity
+  - name: rear_left_steer
+    id: 5
+    mode: position
+  - name: rear_left_drive
+    id: 6
+    mode: velocity
+  - name: rear_right_steer
+    id: 7
+    mode: position
+  - name: rear_right_drive
+    id: 8
+    mode: velocity

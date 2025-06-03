@@ -50,3 +50,9 @@ Feeback object contains the following data:
 - `int16_t temperature`: The temperature of the motor.
 - `int16_t error`: The error code of the motor.
 - `int16_t status`: The status of the motor.
+
+
+## drive commands 
+1) ros2 launch ddsm115_example view_ddsm115.launch.py
+2) ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -p speed:=0.1 -p turn_rate:=0.5
+

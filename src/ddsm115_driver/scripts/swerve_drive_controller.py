@@ -9,35 +9,27 @@ from sensor_msgs.msg import JointState
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Float64MultiArray
 
-# Matplotlib for GUI
+# Matplotlib for GUI (only if enabled)
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 
 
+def wrap_to_pi(angle: float) -> float:
+    """Wrap any angle into [−π, +π]."""
+    a = (angle + math.pi) % (2.0 * math.pi) - math.pi
+    return a
+
+
 class SwerveDriveController(Node):
     """
-    ROS2 Humble Python node to control a 4‐wheel swerve platform, with a simple Matplotlib GUI
-    displaying each module’s current vs. desired angle (blue vs. green arrows) and velocities.
+    ROS2 Humble Python node to control a 4‐wheel swerve platform, with optional Matplotlib GUI.
 
-    Subscriptions:
-      • /cmd_vel           (geometry_msgs/Twist)
-      • /joint_states      (sensor_msgs/JointState)
-
-    Publications (per module):
-      • /<module>_steer_controller/commands   (std_msgs/Float64MultiArray)  → steering angle [rad]
-      • /<module>_drive_controller/commands   (std_msgs/Float64MultiArray)  → drive speed [m/s]
-
-    GUI: A 2×2 grid of circles, one per module (front_left, front_right, rear_left, rear_right).
-      • Blue arrow: current steering angle (length ∝ |current_speed|, scaled 30%–100% of max).
-                    If current_speed < 0, arrow points 180° opposite the steering angle.
-      • Green arrow: desired steering angle (length ∝ |desired_speed|, scaled 30%–100% of max).
-                     If desired_speed < 0, arrow points 180° opposite the steering angle.
-      • Blue text (top-left): current drive velocity (m/s).
-      • Green text (just below blue): desired drive velocity (m/s).
-
-    Steering optimization: After computing raw angle_i via atan2, if |angle_i| > 90° (π/2),
-    adjust angle_i by ±π to bring it into [−π/2, +π/2] and flip speed_i sign. Thus GUI arrows
-    and published commands always use angles within ±90°.
+    • `enable_gui=True` will launch a 2×2 plot of circles showing each module’s arrows.
+    • Horizontal translation (vx, vy) is handled directly by swerve kinematics.
+    • Pure rotation (vx≈0, vy≈0, ω≠0) comes “for free” from the ±90° optimization logic—no
+      additional angle offsets are needed.
+    • After computing raw angles via atan2(Vy, Vx), we constrain each wheel’s steering to
+      [−π/2, +π/2] by flipping angle ±π and inverting speed as necessary.
     """
 
     def __init__(self):
@@ -45,39 +37,25 @@ class SwerveDriveController(Node):
 
         # === PARAMETERS ===
         self.declare_parameter('wheelbase', 0.5)      # Distance front-to-rear (L) [m]
-        self.declare_parameter('track_width', 0.4)    # Distance left-to-right (W) [m]
-        self.declare_parameter('steering_tolerance_deg', 2.0)  # ± tolerance in degrees
+        self.declare_parameter('track_width', 0.5)    # Distance left-to-right (W) [m]
+        self.declare_parameter('steering_tolerance_deg', 2.0)
+        self.declare_parameter('enable_gui', True)
 
-        # Module identifiers
+        # Standard module names
         self.modules = ['front_left', 'front_right', 'rear_left', 'rear_right']
+        self.steer_joint_names = {m: f'{m}_steer' for m in self.modules}
+        self.drive_joint_names = {m: f'{m}_drive' for m in self.modules}
+        self.steer_cmd_topics = {m: f'/{m}_steer_controller/commands' for m in self.modules}
+        self.drive_cmd_topics = {m: f'/{m}_drive_controller/commands' for m in self.modules}
 
-        # Joint names assumed per module
-        self.steer_joint_names = {
-            mod: f'{mod}_steer'
-            for mod in self.modules
-        }
-        self.drive_joint_names = {
-            mod: f'{mod}_drive'
-            for mod in self.modules
-        }
-
-        # Command topics assumed per module
-        self.steer_cmd_topics = {
-            mod: f'/{mod}_steer_controller/commands'
-            for mod in self.modules
-        }
-        self.drive_cmd_topics = {
-            mod: f'/{mod}_drive_controller/commands'
-            for mod in self.modules
-        }
-
-        # Pull parameter values
+        # Pull and store parameters
         self.L = self.get_parameter('wheelbase').get_parameter_value().double_value
         self.W = self.get_parameter('track_width').get_parameter_value().double_value
         tol_deg = self.get_parameter('steering_tolerance_deg').get_parameter_value().double_value
         self.steering_tolerance = math.radians(tol_deg)
+        self.enable_gui = self.get_parameter('enable_gui').get_parameter_value().bool_value
 
-        # Precompute each module’s (x_i, y_i) relative to robot center (x forward, y left)
+        # Precompute each module’s (x_i, y_i) relative to robot center: x forward, y left
         half_L = self.L / 2.0
         half_W = self.W / 2.0
         self.module_positions = {
@@ -87,147 +65,109 @@ class SwerveDriveController(Node):
             'rear_right':  (-half_L, -half_W),
         }
 
-        # === INTERNAL STATE ===
-        # Current steering angles & drive velocities (updated from /joint_states)
-        self.current_steering_angles = {mod: None for mod in self.modules}
-        self.current_drive_velocities = {mod: None for mod in self.modules}
+        # === STATE ===
+        # Current (actual) steering angles & drive velocities (from /joint_states)
+        self.current_steering_angles = {m: None for m in self.modules}
+        self.current_drive_velocities = {m: None for m in self.modules}
 
-        # Target (desired) steering angles & drive speeds (set each /cmd_vel)
-        self.target_steering_angles = {mod: None for mod in self.modules}
-        self.target_drive_speeds = {mod: None for mod in self.modules}
+        # Target (desired) steering angles & drive speeds (set on each /cmd_vel)
+        self.target_steering_angles = {m: None for m in self.modules}
+        self.target_drive_speeds = {m: None for m in self.modules}
 
-        # Per-module “steer_ready” flags, plus a global "all_steer_ready"
-        self.steer_ready = {mod: False for mod in self.modules}
+        # “Ready” flags per module, and global all_steer_ready
+        self.steer_ready = {m: False for m in self.modules}
         self.all_steer_ready = False
 
-        # === PUBLISHERS ===
+        # === PUBLISHERS & SUBSCRIBERS ===
         self.steer_pubs = {}
         self.drive_pubs = {}
-        for mod in self.modules:
-            self.steer_pubs[mod] = self.create_publisher(
+        for m in self.modules:
+            self.steer_pubs[m] = self.create_publisher(
                 Float64MultiArray,
-                self.steer_cmd_topics[mod],
-                10
+                self.steer_cmd_topics[m],
+                10,
             )
-            self.drive_pubs[mod] = self.create_publisher(
+            self.drive_pubs[m] = self.create_publisher(
                 Float64MultiArray,
-                self.drive_cmd_topics[mod],
-                10
+                self.drive_cmd_topics[m],
+                10,
             )
 
-        # === SUBSCRIBERS ===
-        self.create_subscription(
-            Twist,
-            '/cmd_vel',
-            self.cmd_vel_callback,
-            10
-        )
-        self.create_subscription(
-            JointState,
-            '/joint_states',
-            self.joint_states_callback,
-            10
-        )
+        self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_callback, 10)
+        self.create_subscription(JointState, '/joint_states', self.joint_states_callback, 10)
 
-        # Timer to check if all steering axes are within tolerance (~10 Hz)
+        # Timer (~10 Hz) to check if all steers reached their target before sending drives
         self.create_timer(0.1, self.check_all_steer_and_publish_drives)
 
-        # === GUI SETUP ===
-        # We run the Matplotlib event loop in the main thread, and let ROS spin in a background thread.
-        self.init_gui()
-
-        # Spin ROS in a background thread
-        ros_thread = threading.Thread(target=self._spin_ros, daemon=True)
-        ros_thread.start()
-
-        self.get_logger().info('SwerveDriveController initialized—GUI and ROS spinning.')
-
-        # Start the Matplotlib interactive loop (blocks until window closed)
-        self.run_gui()
+        # === GUI SETUP (if enabled) ===
+        if self.enable_gui:
+            self.init_gui()
+            # Run ROS spin in background thread so GUI can update in main thread
+            ros_thread = threading.Thread(target=self._spin_ros, daemon=True)
+            ros_thread.start()
+            self.get_logger().info('SwerveDriveController initialized—GUI enabled.')
+            self.run_gui()
+        else:
+            self.get_logger().info('SwerveDriveController initialized—running headless.')
+            rclpy.spin(self)
 
     def _spin_ros(self):
-        """Runs rclpy.spin in a background thread."""
+        """Background rclpy.spin() for GUI mode."""
         rclpy.spin(self)
 
+    # ---------- GUI METHODS ----------
     def init_gui(self):
-        """Initializes the Matplotlib figure, axes (2×2), and arrow/text artists."""
-        plt.ion()  # Turn on interactive mode
+        """Initialize a 2×2 Matplotlib window with arrows & velocity texts."""
+        plt.ion()
         self.fig, axs = plt.subplots(2, 2, figsize=(8, 8))
         axs = axs.flatten()
 
-        # Containers for arrow and text artists
-        self.axes = {}
         self.quiver_current = {}
         self.quiver_desired = {}
         self.text_current = {}
         self.text_target = {}
 
-        for idx, mod in enumerate(self.modules):
+        for idx, m in enumerate(self.modules):
             ax = axs[idx]
             ax.set_aspect('equal')
             ax.set_xlim(-1.2, 1.2)
             ax.set_ylim(-1.2, 1.2)
 
-            # Draw circle boundary
             circle = Circle((0, 0), radius=1.0, fill=False, color='black', linewidth=1.5)
             ax.add_patch(circle)
 
-            # Initial arrows: zero-length (we’ll update immediately)
-            u_c, v_c = 0.0, 0.0  # current arrow vector
-            u_d, v_d = 0.0, 0.0  # desired arrow vector
+            # Initialize zero‐length arrows at center
+            q_c = ax.quiver(0, 0, 0, 0,
+                            angles='xy', scale_units='xy', scale=1,
+                            color='blue', width=0.02)
+            q_d = ax.quiver(0, 0, 0, 0,
+                            angles='xy', scale_units='xy', scale=1,
+                            color='green', width=0.02)
+            self.quiver_current[m] = q_c
+            self.quiver_desired[m] = q_d
 
-            # Blue arrow for current angle
-            q_c = ax.quiver(
-                0, 0, u_c, v_c,
-                angles='xy', scale_units='xy', scale=1,
-                color='blue', width=0.02, label='Current'
-            )
-            # Green arrow for desired angle
-            q_d = ax.quiver(
-                0, 0, u_d, v_d,
-                angles='xy', scale_units='xy', scale=1,
-                color='green', width=0.02, label='Desired'
-            )
-            self.quiver_current[mod] = q_c
-            self.quiver_desired[mod] = q_d
+            # Place text for current (blue) and desired (green) velocities
+            txt_c = ax.text(-1.1, 1.05, "0.00", color='blue', fontsize=10, weight='bold')
+            txt_d = ax.text(-1.1, 0.85, "0.00", color='green', fontsize=10, weight='bold')
+            self.text_current[m] = txt_c
+            self.text_target[m] = txt_d
 
-            # Text fields (top-left inside circle)
-            txt_c = ax.text(
-                -1.1, 1.05,
-                "0.00",
-                color='blue',
-                fontsize=10,
-                weight='bold'
-            )
-            txt_d = ax.text(
-                -1.1, 0.85,
-                "0.00",
-                color='green',
-                fontsize=10,
-                weight='bold'
-            )
-            self.text_current[mod] = txt_c
-            self.text_target[mod] = txt_d
+            ax.set_title(m.replace('_', ' ').title())
+            ax.axis('off')
 
-            ax.set_title(mod.replace('_', ' ').title())
-            ax.axis('off')  # Hide ticks
-
-            self.axes[mod] = ax
-
-        # Draw initial figure
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
 
     def run_gui(self):
         """
-        Enters a loop that updates the GUI at ~10 Hz.
-        This call blocks until the Matplotlib window is closed.
+        Loop ~10 Hz to update arrows and texts in the Matplotlib window.
+        Blocks until the window is closed.
         """
-        rate = self.create_rate(10)  # 10 Hz
+        rate = self.create_rate(10)
         try:
             while rclpy.ok():
                 self.update_gui()
-                plt.pause(0.001)  # Process Matplotlib events
+                plt.pause(0.001)
                 rate.sleep()
         except KeyboardInterrupt:
             pass
@@ -235,210 +175,171 @@ class SwerveDriveController(Node):
             plt.close(self.fig)
 
     def update_gui(self):
-        """
-        Updates arrows and text for each module based on current vs. target values.
-        Called from the GUI loop (~10 Hz).
-        """
+        """Called in the GUI loop to refresh arrow directions and velocity labels."""
+        for m in self.modules:
+            curr_ang = self.current_steering_angles.get(m) or 0.0
+            tar_ang = self.target_steering_angles.get(m) or 0.0
 
-        for mod in self.modules:
-            # Fetch current & target angles (default to 0 if None)
-            curr_ang = self.current_steering_angles.get(mod) or 0.0
-            tar_ang  = self.target_steering_angles.get(mod)  or 0.0
+            curr_vel = self.current_drive_velocities.get(m) or 0.0
+            tar_vel = self.target_drive_speeds.get(m) or 0.0
 
-            # Fetch current & target velocities (default to 0)
-            curr_vel = self.current_drive_velocities.get(mod) or 0.0
-            tar_vel  = self.target_drive_speeds.get(mod)   or 0.0
-
-            # Compute normalized speeds (clamp at 4.0)
+            # Normalize speeds to [0, 4] → [0, 1]
             norm_c = min(abs(curr_vel), 4.0) / 4.0
             norm_d = min(abs(tar_vel), 4.0) / 4.0
 
-            # Scale each between 30%–100% of max length (0.9)
+            # Scale arrow length 30%–100% of 0.9 radius
             scale_c = 0.3 + 0.7 * norm_c
             scale_d = 0.3 + 0.7 * norm_d
-
-            # Final arrow lengths
             length_c = scale_c * 0.9
             length_d = scale_d * 0.9
 
-            # If velocity is negative, display angle + π (so arrow points opposite)
+            # If velocity < 0, flip arrow 180°
             disp_curr_ang = curr_ang + (math.pi if curr_vel < 0 else 0.0)
-            disp_tar_ang  = tar_ang  + (math.pi if tar_vel  < 0 else 0.0)
+            disp_tar_ang = tar_ang + (math.pi if tar_vel < 0 else 0.0)
 
-            # Mapping so that:
-            #   • angle=0 → arrow points up (0, +length)
-            #   • positive angle rotates CCW: angle=+π/2 → left, angle=π → down, angle=−π/2 → right.
+            # Map: 0° → up; +90° → left; 180° → down; –90° → right
             u_c = -math.sin(disp_curr_ang) * length_c
             v_c =  math.cos(disp_curr_ang) * length_c
-            u_d = -math.sin(disp_tar_ang)  * length_d
-            v_d =  math.cos(disp_tar_ang)  * length_d
+            u_d = -math.sin(disp_tar_ang) * length_d
+            v_d =  math.cos(disp_tar_ang) * length_d
 
-            # Update quiver arrows
-            self.quiver_current[mod].set_UVC(u_c, v_c)
-            self.quiver_desired[mod].set_UVC(u_d, v_d)
+            self.quiver_current[m].set_UVC(u_c, v_c)
+            self.quiver_desired[m].set_UVC(u_d, v_d)
 
-            # Update velocity texts
-            self.text_current[mod].set_text(f"{curr_vel:.2f}")
-            self.text_target[mod].set_text(f"{tar_vel:.2f}")
+            self.text_current[m].set_text(f"{curr_vel:.2f}")
+            self.text_target[m].set_text(f"{tar_vel:.2f}")
 
-        # Redraw
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
 
+    # ---------- CONTROL METHODS ----------
     def cmd_vel_callback(self, msg: Twist):
         """
-        On new /cmd_vel:
-          1) Compute (raw_angle_i, raw_speed_i) for each module via swerve kinematics.
-          2) Optimize: if |raw_angle_i| > 90°, set angle_i = raw_angle_i ± π (to bring into ±90°)
-             and flip speed_i sign.
-          3) If all steering axes are already within tolerance of the optimized angles
-             AND all_steer_ready == True, just publish updated drive speeds.
-          4) Otherwise, stop all drives, set new optimized targets, publish steering setpoints,
-             and wait for check_all_steer_and_publish_drives() to release drives.
+        On each /cmd_vel:
+        1) Compute raw (angle_i, speed_i) from swerve kinematics:
+             Vx_i = vx – ω·y_i
+             Vy_i = vy + ω·x_i
+             angle_i = atan2(Vy_i, Vx_i)
+             speed_i = sqrt(Vx_i² + Vy_i²)
+        2) Constrain angle_i into [–π/2, +π/2] by ±π flip & speed inversion.
+        3) If all four steers already within tolerance of their new angles, publish drives immediately.
+        4) Otherwise: stop all drives, send new steering targets, and wait for the timer to release drives.
         """
         vx = msg.linear.x
         vy = msg.linear.y
-        omega = msg.angular.z  # yaw rate
+        omega = msg.angular.z
 
-        # 1) Compute per‐module raw angle_i & speed_i
+        # 1) Raw kinematic angles & speeds
         raw_angles = {}
         raw_speeds = {}
-        for mod, (x_i, y_i) in self.module_positions.items():
+        for m, (x_i, y_i) in self.module_positions.items():
             Vx_i = vx - omega * y_i
             Vy_i = vy + omega * x_i
             speed_i = math.hypot(Vx_i, Vy_i)
             angle_i = math.atan2(Vy_i, Vx_i)
-            raw_angles[mod] = angle_i
-            raw_speeds[mod] = speed_i
+            raw_angles[m] = angle_i
+            raw_speeds[m] = speed_i
 
-        # 2) Optimize angle to ±90° range (±π/2). If outside, subtract/add π and invert speed.
+        # 2) ±90° optimization
         new_angles = {}
         new_speeds = {}
-        for mod in self.modules:
-            ang = raw_angles[mod]
-            spd = raw_speeds[mod]
-
-            # If angle > +90° (π/2), subtract π and invert speed
-            if ang > math.pi/2:
+        for m in self.modules:
+            ang = wrap_to_pi(raw_angles[m])
+            spd = raw_speeds[m]
+            if ang > math.pi / 2:
                 ang -= math.pi
                 spd = -spd
-            # If angle < −90° (−π/2), add π and invert speed
-            elif ang < -math.pi/2:
+            elif ang < -math.pi / 2:
                 ang += math.pi
                 spd = -spd
+            new_angles[m] = wrap_to_pi(ang)
+            new_speeds[m] = spd
 
-            # Now ang is guaranteed in [-π/2, +π/2]
-            new_angles[mod] = ang
-            new_speeds[mod] = spd
-
-        # 3) If previously all_steer_ready and current angles already within tolerance of new_angles,
-        #    then immediately publish new drive speeds and update target_steering_angles for next check.
+        # 3) If already “all_steer_ready” AND all current angles within tolerance, publish drives
         if self.all_steer_ready:
             all_within = True
-            for mod in self.modules:
-                curr_ang = self.current_steering_angles.get(mod)
+            for m in self.modules:
+                curr_ang = self.current_steering_angles.get(m)
                 if curr_ang is None:
                     all_within = False
                     break
-                err = abs(self._angle_diff(new_angles[mod], curr_ang))
-                if err > self.steering_tolerance:
+                if abs(self._angle_diff(new_angles[m], curr_ang)) > self.steering_tolerance:
                     all_within = False
                     break
 
             if all_within:
-                # Publish new drive speeds immediately
-                for mod in self.modules:
-                    self.target_drive_speeds[mod] = new_speeds[mod]
+                for m in self.modules:
+                    self.target_drive_speeds[m] = new_speeds[m]
                     drive_msg = Float64MultiArray()
-                    drive_msg.data = [self.target_drive_speeds[mod]]
-                    self.drive_pubs[mod].publish(drive_msg)
-                self.get_logger().info('All steers within tolerance → published new drive speeds.')
-
-                # Update steering targets too so future cmd_vel comparisons use them
-                for mod in self.modules:
-                    self.target_steering_angles[mod] = new_angles[mod]
+                    drive_msg.data = [self.target_drive_speeds[m]]
+                    self.drive_pubs[m].publish(drive_msg)
+                self.get_logger().info('All steers within tolerance → published updated drive speeds.')
+                for m in self.modules:
+                    self.target_steering_angles[m] = new_angles[m]
                 return
 
-        # 4) Otherwise, re‐steer: stop all drives, update targets, publish steering
-        for mod in self.modules:
+        # 4) Otherwise, halt all drives, update steering targets, then wait for check timer
+        for m in self.modules:
             stop_msg = Float64MultiArray()
             stop_msg.data = [0.0]
-            self.drive_pubs[mod].publish(stop_msg)
-        self.get_logger().info('Published 0.0 to all 4 drives to stop before re‐steering.')
+            self.drive_pubs[m].publish(stop_msg)
+        self.get_logger().info('Stopping all drives before re-steering.')
 
-        # Update target angles & speeds, reset ready flags
-        for mod in self.modules:
-            self.target_steering_angles[mod] = new_angles[mod]
-            self.target_drive_speeds[mod] = new_speeds[mod]
-            self.steer_ready[mod] = False
+        for m in self.modules:
+            self.target_steering_angles[m] = new_angles[m]
+            self.target_drive_speeds[m] = new_speeds[m]
+            self.steer_ready[m] = False
         self.all_steer_ready = False
 
-        # Publish new steering setpoints
-        for mod in self.modules:
+        for m in self.modules:
             steer_msg = Float64MultiArray()
-            steer_msg.data = [self.target_steering_angles[mod]]
-            self.steer_pubs[mod].publish(steer_msg)
-        self.get_logger().info('Published new steering targets for all 4 modules (optimized to ±90°).')
+            steer_msg.data = [self.target_steering_angles[m]]
+            self.steer_pubs[m].publish(steer_msg)
+        self.get_logger().info('Published optimized steering targets (±90° constraint).')
 
     def joint_states_callback(self, msg: JointState):
-        """
-        Update current steering angles & drive velocities from /joint_states.
-        Each JointState name[] should include the 8 relevant joints (4 steer + 4 drive).
-        """
+        """Update current steering angles & drive velocities from /joint_states."""
         for i, name in enumerate(msg.name):
-            # Steering joints
-            for mod in self.modules:
-                if name == self.steer_joint_names[mod]:
-                    self.current_steering_angles[mod] = msg.position[i]
-            # Drive joints (velocity)
-            for mod in self.modules:
-                if name == self.drive_joint_names[mod]:
-                    self.current_drive_velocities[mod] = msg.velocity[i]
+            for m in self.modules:
+                if name == self.steer_joint_names[m]:
+                    self.current_steering_angles[m] = msg.position[i]
+                if name == self.drive_joint_names[m]:
+                    self.current_drive_velocities[m] = msg.velocity[i]
 
     def check_all_steer_and_publish_drives(self):
         """
-        Timer callback (10 Hz) that checks if all steering angles are within tolerance.
-        If so, and if we haven't yet published drive speeds for this target, do so now.
+        Called ~10 Hz: if all steering angles are within ±tolerance, publish all drive speeds.
         """
-        # If no target set for any module yet, skip
-        if any(self.target_steering_angles[mod] is None for mod in self.modules):
+        if any(self.target_steering_angles[m] is None for m in self.modules):
             return
-
-        # If we already marked all_steer_ready, skip
         if self.all_steer_ready:
             return
-
-        # If we lack current info for any module, skip
-        if any(self.current_steering_angles[mod] is None for mod in self.modules):
+        if any(self.current_steering_angles[m] is None for m in self.modules):
             return
 
-        # Check each module
         all_now_ready = True
-        for mod in self.modules:
+        for m in self.modules:
             err = abs(self._angle_diff(
-                self.target_steering_angles[mod],
-                self.current_steering_angles[mod]
+                self.target_steering_angles[m],
+                self.current_steering_angles[m]
             ))
             if err <= self.steering_tolerance:
-                self.steer_ready[mod] = True
+                self.steer_ready[m] = True
             else:
-                self.steer_ready[mod] = False
+                self.steer_ready[m] = False
                 all_now_ready = False
 
         if all_now_ready:
             self.all_steer_ready = True
-            # Publish drive speeds for all modules
-            for mod in self.modules:
+            for m in self.modules:
                 drive_msg = Float64MultiArray()
-                drive_msg.data = [self.target_drive_speeds[mod]]
-                self.drive_pubs[mod].publish(drive_msg)
-            self.get_logger().info('All steers within ±tolerance → published all 4 drive speeds.')
+                drive_msg.data = [self.target_drive_speeds[m]]
+                self.drive_pubs[m].publish(drive_msg)
+            self.get_logger().info('All steers within tolerance → published drive speeds.')
 
     @staticmethod
     def _angle_diff(goal: float, current: float) -> float:
-        """
-        Shortest signed difference between two angles (radians), wrapped to [−π, +π].
-        """
+        """Wrapped difference between two angles (in [−π, +π])."""
         a = (goal - current) % (2.0 * math.pi)
         if a > math.pi:
             a -= 2.0 * math.pi
@@ -448,10 +349,9 @@ class SwerveDriveController(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = SwerveDriveController()
-
-    # ROS spin is handled in a background thread; GUI loop is blocking in main.
+    # If GUI disabled, spin was called in __init__. Otherwise, GUI loop is running.
     try:
-        rclpy.spin(node)  # In case any clean‐up is needed (though run_gui blocks).
+        pass
     except KeyboardInterrupt:
         pass
     finally:
